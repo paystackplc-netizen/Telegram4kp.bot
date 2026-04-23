@@ -32,6 +32,6 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 ## 4kpnote Telegram Bot
 
-Source: `artifacts/api-server/src/telegram/`. Trigger word `4kpnote`. Pipeline: Gemini rewrites text → Resemble synthesizes audio → reply as Telegram voice note. Per-user voice prefs in `userPreferencesTable` (lib/db). Required secrets: `BOT_TOKEN`, `GEMINI_API_KEY`, `RESEMBLE_API_KEY`, `RESEMBLE_VOICE_DEFAULT`, `SESSION_SECRET`. Optional per-preset: `RESEMBLE_VOICE_{MALE,FEMALE,DEEP,CALM,ENERGETIC,WHISPER,PROFESSIONAL}`.
+Source: `artifacts/api-server/src/telegram/`. Trigger word `4kpnote`. Pipeline: Ollama Cloud rewrites text for natural speech → Resemble synthesizes audio → reply as Telegram voice note. Voices are pulled live from the user's full Resemble account (`/voices` shows a paginated picker). Per-user voice UUID + name stored in `userPreferencesTable` (lib/db). Required secrets: `BOT_TOKEN`, `OLLAMA_API_KEY`, `RESEMBLE_API_KEY`, `RESEMBLE_VOICE_DEFAULT`, `SESSION_SECRET`. Optional: `OLLAMA_MODEL` (default `gpt-oss:20b`), `RESEMBLE_PROJECT_UUID`.
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.

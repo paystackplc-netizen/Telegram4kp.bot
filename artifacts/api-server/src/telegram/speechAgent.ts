@@ -1,10 +1,10 @@
 import { logger } from "../lib/logger";
 
-const GEMINI_MODEL = process.env["GEMINI_MODEL"] || "gemini-2.0-flash";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const OLLAMA_ENDPOINT =
+  process.env["OLLAMA_ENDPOINT"] || "https://ollama.com/api/chat";
+const OLLAMA_MODEL = process.env["OLLAMA_MODEL"] || "gpt-oss:20b";
 
-function buildPrompt(text: string): string {
-  return `You rewrite written text into natural spoken language for a TTS engine.
+const SYSTEM_PROMPT = `You rewrite written text into natural spoken language for a TTS engine.
 
 RULES:
 - Preserve the original meaning exactly. Do not add new facts.
@@ -15,11 +15,7 @@ RULES:
 - Convert numbers, symbols, abbreviations and acronyms into spoken form.
 - Replace [PAUSE N] markers with "..." (longer pauses with more dots).
 - Strip markdown, code fences, URLs, emojis, and any non-speech characters.
-- Output ONLY the rewritten text. No preamble, no quotes, no explanations.
-
-TEXT:
-${text}`;
-}
+- Output ONLY the rewritten text. No preamble, no quotes, no explanations.`;
 
 function basicFallback(text: string): string {
   return text
@@ -29,53 +25,58 @@ function basicFallback(text: string): string {
     .trim();
 }
 
+interface OllamaChatResponse {
+  message?: { role: string; content: string };
+  done?: boolean;
+  error?: string;
+}
+
 export async function speechAgent(
   text: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const apiKey = process.env["GEMINI_API_KEY"];
+  const apiKey = process.env["OLLAMA_API_KEY"];
   if (!apiKey) {
-    logger.warn("GEMINI_API_KEY not set, using fallback formatter");
+    logger.warn("OLLAMA_API_KEY not set, using fallback formatter");
     return basicFallback(text);
   }
 
   try {
-    const res = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+    const res = await fetch(OLLAMA_ENDPOINT, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: buildPrompt(text) }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topP: 0.9,
-          maxOutputTokens: 2048,
-        },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+        model: OLLAMA_MODEL,
+        stream: false,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: `TEXT:\n${text}` },
         ],
+        options: {
+          temperature: 0.7,
+          top_p: 0.9,
+          num_predict: 2048,
+        },
       }),
       signal,
     });
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      logger.error({ status: res.status, body: body.slice(0, 500) }, "Gemini error");
+      logger.error(
+        { status: res.status, body: body.slice(0, 500), model: OLLAMA_MODEL },
+        "Ollama error",
+      );
       return basicFallback(text);
     }
 
-    const data = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    const out = data.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text || "")
-      .join("")
-      .trim();
-
+    const data = (await res.json()) as OllamaChatResponse;
+    const out = data.message?.content?.trim();
     if (!out) {
-      logger.warn("Gemini returned empty output, using fallback");
+      logger.warn({ data: JSON.stringify(data).slice(0, 300) }, "Ollama returned empty output, using fallback");
       return basicFallback(text);
     }
     return out;
