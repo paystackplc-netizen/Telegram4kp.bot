@@ -1,0 +1,35 @@
+{
+  "name": "4kpnote-voice-bot",
+  "version": "1.0.0",
+  "description": "Production-ready Telegram Voice Bot on Cloudflare Workers with AI speech optimization and Resemble AI TTS",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "tail": "wrangler tail",
+    "setup-webhook": "wrangler curl /setup",
+    "logs": "wrangler tail --format pretty"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "voice",
+    "cloudflare-workers",
+    "tts",
+    "resemble-ai",
+    "gemini",
+    "ai",
+    "speech"
+  ],
+  "author": "4kpnote",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

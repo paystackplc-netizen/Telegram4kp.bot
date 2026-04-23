@@ -1,0 +1,37 @@
+# 4kpnote Cloud Voice Bot - Cloudflare Worker Configuration
+name = "4kpnote-voice-bot"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Environment Variables (Secrets should be set via wrangler secret put)
+[vars]
+ENVIRONMENT = "production"
+
+# KV Namespace for caching and user preferences
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "your_kv_namespace_id_here"
+
+# Rate limiting (optional - uses Cloudflare's built-in rate limiting)
+# [[unsafe.bindings]]
+# name = "RATE_LIMITER"
+# type = "ratelimit"
+# namespace_id = "1001"
+# simple = { limit = 10, period = 60 }
+
+# Observability - Logs are automatically available in Cloudflare Dashboard
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# Environment-specific configuration
+[env.staging]
+name = "4kpnote-voice-bot-staging"
+[env.staging.vars]
+ENVIRONMENT = "staging"
+
+[env.production]
+name = "4kpnote-voice-bot"
+[env.production.vars]
+ENVIRONMENT = "production"

@@ -1,0 +1,8 @@
+# Copy this file to .dev.vars for local development
+# These are only used in wrangler dev mode, NOT in production
+# Production secrets should be set with: wrangler secret put NAME
+
+BOT_TOKEN=8590699653:AAHjRJYNYi04jGlD94pyF_h98PmPsZVtITM
+GEMINI_API_KEY=AIzaSyB3OjqKfRhDLATYPrHSCde08Q7baHTQQcA
+RESEMBLE_API_KEY=AliTQUorXrCfkHKrStipSgtt
+WEBHOOK_SECRET=your_webhook_secret_here
