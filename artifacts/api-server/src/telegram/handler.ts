@@ -209,21 +209,29 @@ async function handleTrigger(
   const ac = new AbortController();
   const timeout = setTimeout(() => ac.abort(), 60_000);
   try {
-    log.info({ userId, voice: voice.name, len: parsed.text.length }, "processing voice request");
+    log.info({ userId, voice: voice.name, len: parsed.text.length }, "[VOICE] processing request");
+
+    log.info("[VOICE] step 1/4: rewriting text for natural speech");
     const processed = await speechAgent(parsed.text, ac.signal);
+
+    log.info({ chars: processed.length }, "[VOICE] step 2/4: downloading + converting audio");
     await sendChatAction(chatId, "upload_voice");
     const { audio, contentType } = await synthesize(processed, voice.uuid, ac.signal);
+
+    log.info({ bytes: audio.length, contentType }, "[VOICE] step 3/4: sending voice note to Telegram");
     await sendVoice(chatId, audio, {
       reply_to_message_id: msg.message_id,
       contentType,
       filename: `4kpnote-${voice.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.ogg`,
     });
-    log.info({ userId, voice: voice.name, bytes: audio.length }, "voice sent");
+    log.info({ userId, voice: voice.name, bytes: audio.length }, "[VOICE] step 4/4: done ✓");
   } catch (err) {
-    log.error({ err }, "voice request failed");
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ err, message }, "[VOICE] request failed");
+    const detail = message.length > 0 && message.length < 200 ? `\n\nDetails: ${message}` : "";
     await sendMessage(
       chatId,
-      "⚠️ Could not generate the voice note. Please try again in a moment.",
+      `⚠️ Could not generate the voice note. Please try again in a moment.${detail}`,
       { reply_to_message_id: msg.message_id },
     ).catch(() => {});
   } finally {
