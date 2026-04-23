@@ -156,8 +156,21 @@ export async function findVoiceByQuery(
   return contains ?? null;
 }
 
-export function getDefaultVoice(): { uuid: string; name: string } | null {
-  const uuid = (process.env["RESEMBLE_VOICE_DEFAULT"] || "").trim();
-  if (!uuid) return null;
-  return { uuid, name: "Default" };
+export async function getDefaultVoice(): Promise<{ uuid: string; name: string } | null> {
+  const envUuid = (process.env["RESEMBLE_VOICE_DEFAULT"] || "").trim();
+  const all = await getAllVoices().catch(() => [] as ResembleVoice[]);
+  if (envUuid) {
+    const match = all.find((v) => v.uuid === envUuid);
+    if (match) return { uuid: match.uuid, name: match.name };
+    // env UUID not in account — fall through to first voice
+    logger.warn(
+      { envUuid },
+      "RESEMBLE_VOICE_DEFAULT does not match any voice in this account; using first available",
+    );
+  }
+  if (all.length > 0) {
+    const first = all[0]!;
+    return { uuid: first.uuid, name: first.name };
+  }
+  return null;
 }

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { logger } from "../lib/logger";
 
 const RESEMBLE_ENDPOINT =
@@ -6,6 +7,47 @@ const RESEMBLE_ENDPOINT =
 export interface TtsResult {
   audio: Buffer;
   contentType: string;
+}
+
+// Convert any audio Buffer to OGG/Opus, the format Telegram requires
+// for real "voice note" playback (otherwise it falls back to a generic file).
+async function toOggOpus(input: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const ff = spawn(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", "pipe:0",
+        "-vn",
+        "-ac", "1",
+        "-ar", "48000",
+        "-c:a", "libopus",
+        "-b:a", "48k",
+        "-application", "voip",
+        "-f", "ogg",
+        "pipe:1",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const chunks: Buffer[] = [];
+    const errs: Buffer[] = [];
+    ff.stdout.on("data", (c: Buffer) => chunks.push(c));
+    ff.stderr.on("data", (c: Buffer) => errs.push(c));
+    ff.on("error", reject);
+    ff.on("close", (code) => {
+      if (code !== 0) {
+        reject(
+          new Error(
+            `ffmpeg exited ${code}: ${Buffer.concat(errs).toString().slice(0, 300)}`,
+          ),
+        );
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+    ff.stdin.end(input);
+  });
 }
 
 interface ResembleResponse {
@@ -64,34 +106,40 @@ export async function synthesize(
     throw new Error(`Resemble TTS failed: ${res.status} ${body.slice(0, 200)}`);
   }
 
-  // Some endpoints return raw audio
-  if (contentType.startsWith("audio/")) {
-    const buf = Buffer.from(await res.arrayBuffer());
-    return { audio: buf, contentType };
-  }
+  let raw: Buffer | null = null;
 
-  // JSON response with audio_content (base64) or audio_url
-  if (contentType.includes("application/json")) {
+  if (contentType.startsWith("audio/")) {
+    raw = Buffer.from(await res.arrayBuffer());
+  } else if (contentType.includes("application/json")) {
     const data = (await res.json()) as ResembleResponse;
     if (data.audio_content) {
-      return {
-        audio: Buffer.from(data.audio_content, "base64"),
-        contentType: data.audio_content_type || "audio/wav",
-      };
+      raw = Buffer.from(data.audio_content, "base64");
+    } else {
+      const url = data.audio_url || data.url;
+      if (url) {
+        const a = await fetch(url, { signal });
+        if (!a.ok) throw new Error(`Failed to download audio: ${a.status}`);
+        raw = Buffer.from(await a.arrayBuffer());
+      } else {
+        throw new Error(
+          `Resemble unexpected JSON: ${JSON.stringify(data).slice(0, 200)}`,
+        );
+      }
     }
-    const url = data.audio_url || data.url;
-    if (url) {
-      const a = await fetch(url, { signal });
-      if (!a.ok) throw new Error(`Failed to download audio: ${a.status}`);
-      return {
-        audio: Buffer.from(await a.arrayBuffer()),
-        contentType: a.headers.get("content-type") || "audio/wav",
-      };
-    }
-    throw new Error(`Resemble unexpected JSON: ${JSON.stringify(data).slice(0, 200)}`);
+  } else {
+    raw = Buffer.from(await res.arrayBuffer());
   }
 
-  // Unknown content type — assume raw audio
-  const buf = Buffer.from(await res.arrayBuffer());
-  return { audio: buf, contentType: contentType || "audio/wav" };
+  if (!raw || raw.length === 0) {
+    throw new Error("Resemble returned empty audio payload");
+  }
+
+  // Telegram requires OGG/Opus for native voice-note playback.
+  try {
+    const ogg = await toOggOpus(raw);
+    return { audio: ogg, contentType: "audio/ogg" };
+  } catch (err) {
+    logger.error({ err }, "ffmpeg conversion to OGG/Opus failed");
+    throw new Error("Failed to convert audio to OGG/Opus for Telegram voice note");
+  }
 }
