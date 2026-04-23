@@ -60,10 +60,17 @@ router.post("/telegram/webhook", (req: Request, res: Response) => {
   if (!update || typeof update !== "object") return;
 
   const log = (req as Request & { log?: typeof logger }).log ?? logger;
-  // Process async; do not block response.
-  Promise.resolve()
-    .then(() => handleUpdate(update, log))
-    .catch((err) => log.error({ err }, "handleUpdate failed"));
+  // Process async; do not block response. Wrap defensively so any
+  // sync throw inside handleUpdate is also caught.
+  setImmediate(() => {
+    try {
+      Promise.resolve(handleUpdate(update, log)).catch((err) =>
+        log.error({ err }, "handleUpdate failed (async)"),
+      );
+    } catch (err) {
+      log.error({ err }, "handleUpdate failed (sync)");
+    }
+  });
 });
 
 router.get("/telegram/setup", async (_req, res) => {
