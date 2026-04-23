@@ -24,4 +24,14 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
+## Artifacts
+
+- `artifacts/api-server` — Express API + Telegram bot (`/api/telegram/*`, `/api/healthz`). Auto-registers webhook on boot via `REPLIT_DOMAINS`.
+- `artifacts/bot-landing` — public landing page at `/` for the 4kpnote Telegram bot.
+- `artifacts/mockup-sandbox` — design preview server (unused for production).
+
+## 4kpnote Telegram Bot
+
+Source: `artifacts/api-server/src/telegram/`. Trigger word `4kpnote`. Pipeline: Gemini rewrites text → Resemble synthesizes audio → reply as Telegram voice note. Per-user voice prefs in `userPreferencesTable` (lib/db). Required secrets: `BOT_TOKEN`, `GEMINI_API_KEY`, `RESEMBLE_API_KEY`, `RESEMBLE_VOICE_DEFAULT`, `SESSION_SECRET`. Optional per-preset: `RESEMBLE_VOICE_{MALE,FEMALE,DEEP,CALM,ENERGETIC,WHISPER,PROFESSIONAL}`.
+
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
