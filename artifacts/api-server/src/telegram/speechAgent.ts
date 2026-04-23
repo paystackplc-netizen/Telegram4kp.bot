@@ -1,8 +1,6 @@
 import { logger } from "../lib/logger";
 
-const OLLAMA_ENDPOINT =
-  process.env["OLLAMA_ENDPOINT"] || "https://ollama.com/api/chat";
-const OLLAMA_MODEL = process.env["OLLAMA_MODEL"] || "gpt-oss:20b";
+const GEMINI_MODEL = process.env["GEMINI_MODEL"] || "gemini-2.5-flash";
 
 const SYSTEM_PROMPT = `You rewrite written text into natural spoken language for a TTS engine.
 
@@ -25,40 +23,43 @@ function basicFallback(text: string): string {
     .trim();
 }
 
-interface OllamaChatResponse {
-  message?: { role: string; content: string };
-  done?: boolean;
-  error?: string;
+interface GeminiResponse {
+  candidates?: Array<{
+    content?: { role?: string; parts?: Array<{ text?: string }> };
+    finishReason?: string;
+  }>;
+  error?: { code?: string; message?: string };
 }
 
 export async function speechAgent(
   text: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const apiKey = process.env["OLLAMA_API_KEY"];
-  if (!apiKey) {
-    logger.warn("OLLAMA_API_KEY not set, using fallback formatter");
+  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
+  const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+
+  if (!baseUrl || !apiKey) {
+    logger.warn("Replit Gemini integration not configured, using fallback formatter");
     return basicFallback(text);
   }
 
+  const url = `${baseUrl.replace(/\/+$/, "")}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
   try {
-    const res = await fetch(OLLAMA_ENDPOINT, {
+    const res = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        stream: false,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `TEXT:\n${text}` },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `${SYSTEM_PROMPT}\n\nTEXT:\n${text}` }],
+          },
         ],
-        options: {
+        generationConfig: {
           temperature: 0.7,
-          top_p: 0.9,
-          num_predict: 2048,
+          topP: 0.9,
+          maxOutputTokens: 2048,
         },
       }),
       signal,
@@ -67,16 +68,23 @@ export async function speechAgent(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       logger.error(
-        { status: res.status, body: body.slice(0, 500), model: OLLAMA_MODEL },
-        "Ollama error",
+        { status: res.status, body: body.slice(0, 500), model: GEMINI_MODEL },
+        "Gemini error",
       );
       return basicFallback(text);
     }
 
-    const data = (await res.json()) as OllamaChatResponse;
-    const out = data.message?.content?.trim();
+    const data = (await res.json()) as GeminiResponse;
+    const out = data.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text || "")
+      .join("")
+      .trim();
+
     if (!out) {
-      logger.warn({ data: JSON.stringify(data).slice(0, 300) }, "Ollama returned empty output, using fallback");
+      logger.warn(
+        { data: JSON.stringify(data).slice(0, 300) },
+        "Gemini returned empty output, using fallback",
+      );
       return basicFallback(text);
     }
     return out;
