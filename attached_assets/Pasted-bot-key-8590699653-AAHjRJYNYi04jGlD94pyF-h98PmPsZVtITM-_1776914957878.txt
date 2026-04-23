@@ -1,0 +1,155 @@
+bot key_8590699653:AAHjRJYNYi04jGlD94pyF_h98PmPsZVtITM
+resemble ai key_AliTQUorXrCfkHKrStipSgtt
+gemini key _AIzaSyB3OjqKfRhDLATYPrHSCde08Q7baHTQQcA
+ and i want to choice the voice from menu or preset 
+production state not demo file
+
+
+
+You are a senior backend engineer.
+
+Build a production-ready Telegram VOICE BOT using Cloudflare Workers (NOT Node.js server).
+
+IMPORTANT ARCHITECTURE:
+This bot MUST run on Cloudflare Workers using Telegram Webhooks.
+
+---
+
+PROJECT NAME:
+4kpnote Cloud Voice Bot
+
+---
+
+CORE TRIGGER:
+"4kpnote"
+
+When a message starts with "4kpnote":
+- extract voice type + text
+- process text through AI agent
+- generate voice using Resemble AI
+- send Telegram voice note back to user/chat
+
+---
+
+TECH STACK:
+- Cloudflare Workers (JavaScript only)
+- Telegram Bot API (webhook mode)
+- AI agent API (Gemini or Groq free API)
+- Resemble AI TTS API:
+  https://f.cluster.resemble.ai/synthesize 
+
+---
+
+CRITICAL REQUIREMENT:
+DO NOT use Node.js features like:
+- fs
+- express
+- net
+- long running servers
+
+ONLY use:
+- fetch()
+- async functions
+- Web APIs
+- KV storage (optional)
+
+---
+
+AI AGENT LAYER (VERY IMPORTANT):
+Create a function: speechAgent(text)
+
+It must:
+- send text to Gemini or Groq API
+- rewrite it into natural spoken format
+- insert pauses using "..."
+- add emotion tags like:
+  (calm), (whisper), (excited), (serious)
+- improve grammar for speech clarity
+- keep original meaning
+
+---
+
+VOICE SYSTEM:
+Support multiple voices:
+- default
+- male
+- female
+- deep
+
+Format:
+4kpnote|voice|text
+
+If voice not provided → use default.
+
+---
+
+TEXT PROCESSING RULES:
+- convert [PAUSE 2] → natural pause "..."
+- convert punctuation into speech rhythm
+- remove robotic or unnatural phrasing
+- optimize for TTS clarity
+
+---
+
+TELEGRAM REQUIREMENTS:
+- MUST use webhook (Cloudflare Worker endpoint)
+- MUST send voice note using Telegram sendVoice API
+- MUST support fixed chat ID or dynamic chat
+- MUST reply with generated voice instantly
+
+---
+
+VOICE GENERATION:
+Use Resemble AI API:
+POST https://f.cluster.resemble.ai/synthesize 
+
+Headers:
+Authorization: Token YOUR_KEY
+Content-Type: application/json
+
+Body:
+{
+  "body": "<processed text>",
+  "voice": "<voice_id>"
+}
+
+Return:
+audio_url → send to Telegram as voice note
+
+---
+
+FEATURES:
+- 4kpnote trigger system
+- AI speech formatting agent
+- voice selection system
+- emotion + pause system
+- 1000–1500 character support
+- error handling fallback response
+- clean modular structure
+
+---
+
+OPTIONAL (IF POSSIBLE):
+- KV storage for long text buffering
+- logging system
+- voice caching system
+
+---
+
+OUTPUT REQUIREMENTS:
+- full Cloudflare Worker code (single file or modular)
+- production-ready structure
+- .env replaced with Cloudflare Secrets
+- deployment-ready instructions included
+- no Node.js dependencies
+
+---
+
+FINAL GOAL:
+A serverless Telegram voice bot that:
+1. receives text via webhook
+2. enhances it using AI agent
+3. converts it to natural speech
+4. sends it back as a Telegram voice note
+
+Make it stable, fast, and production-ready. full ready to deploy file
