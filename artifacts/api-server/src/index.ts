@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { autoRegisterWebhook } from "./telegram/autoSetup";
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +23,8 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  // Fire and forget — don't block startup
+  autoRegisterWebhook().catch((e) =>
+    logger.error({ err: e }, "autoRegisterWebhook failed"),
+  );
 });
