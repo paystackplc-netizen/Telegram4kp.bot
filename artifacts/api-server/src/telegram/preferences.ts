@@ -1,24 +1,34 @@
 import { db, userPreferencesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-export async function getUserVoice(telegramUserId: number): Promise<string> {
+export interface UserVoice {
+  uuid: string;
+  name: string | null;
+}
+
+export async function getUserVoice(
+  telegramUserId: number,
+): Promise<UserVoice | null> {
   const rows = await db
     .select()
     .from(userPreferencesTable)
     .where(eq(userPreferencesTable.telegramUserId, telegramUserId))
     .limit(1);
-  return rows[0]?.voiceId ?? "default";
+  const row = rows[0];
+  if (!row || !row.voiceId || row.voiceId === "default") return null;
+  return { uuid: row.voiceId, name: row.voiceName ?? null };
 }
 
 export async function setUserVoice(
   telegramUserId: number,
-  voiceId: string,
+  uuid: string,
+  name: string,
 ): Promise<void> {
   await db
     .insert(userPreferencesTable)
-    .values({ telegramUserId, voiceId })
+    .values({ telegramUserId, voiceId: uuid, voiceName: name })
     .onConflictDoUpdate({
       target: userPreferencesTable.telegramUserId,
-      set: { voiceId, updatedAt: new Date() },
+      set: { voiceId: uuid, voiceName: name, updatedAt: new Date() },
     });
 }

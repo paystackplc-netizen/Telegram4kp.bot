@@ -3,16 +3,6 @@ import { useEffect, useState } from "react";
 const BOT_USERNAME = "makanakibot4kpbot";
 const BOT_URL = `https://t.me/${BOT_USERNAME}`;
 
-const VOICES: Array<{ id: string; emoji: string; name: string; desc: string }> = [
-  { id: "default", emoji: "🔊", name: "Default", desc: "Natural, clear, conversational" },
-  { id: "male", emoji: "👨", name: "Male", desc: "Warm, confident, articulate" },
-  { id: "female", emoji: "👩", name: "Female", desc: "Clear, warm, expressive" },
-  { id: "deep", emoji: "🎙️", name: "Deep", desc: "Deep, resonant, authoritative" },
-  { id: "calm", emoji: "😌", name: "Calm", desc: "Soft, calming, soothing" },
-  { id: "energetic", emoji: "⚡", name: "Energetic", desc: "Energetic, enthusiastic" },
-  { id: "whisper", emoji: "🤫", name: "Whisper", desc: "Soft whisper, intimate" },
-  { id: "professional", emoji: "💼", name: "Professional", desc: "Polished, broadcast quality" },
-];
 
 function StatusDot() {
   const [ok, setOk] = useState<boolean | null>(null);
@@ -147,37 +137,30 @@ export default function App() {
           </h2>
           <div style={{ display: "grid", gap: 10 }}>
             <Code>{"4kpnote Hello world, this is my first voice note"}</Code>
-            <Code>{"4kpnote|deep|In a world of infinite possibilities"}</Code>
-            <Code>{"4kpnote|whisper|I have a secret to tell you"}</Code>
+            <Code>{"4kpnote|Liam|In a world of infinite possibilities"}</Code>
+            <Code>{"4kpnote|Aria|I have a secret to tell you"}</Code>
           </div>
           <p style={{ fontSize: 14, color: "#6b7280", margin: "14px 0 0" }}>
-            Format: <code style={{ color: "#a78bfa" }}>4kpnote|voice|text</code> — voice is optional. Use <code style={{ color: "#a78bfa" }}>/voices</code> to set a default.
+            Format: <code style={{ color: "#a78bfa" }}>4kpnote|voice|text</code> — voice is optional and matches by name or UUID. Use <code style={{ color: "#a78bfa" }}>/voices</code> to browse your library.
           </p>
         </section>
 
         <section style={{ marginBottom: 56 }}>
           <h2 style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6b7280", margin: "0 0 14px" }}>
-            Voice presets
+            Voices
           </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
-            {VOICES.map((v) => (
-              <div
-                key={v.id}
-                style={{
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  borderRadius: 14,
-                  padding: 14,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                  <span style={{ fontSize: 20 }}>{v.emoji}</span>
-                  <span style={{ fontWeight: 600, color: "#e5e7eb" }}>{v.name}</span>
-                  <code style={{ marginLeft: "auto", fontSize: 11, color: "#6b7280" }}>{v.id}</code>
-                </div>
-                <p style={{ fontSize: 13, color: "#9ca3af", margin: 0, lineHeight: 1.45 }}>{v.desc}</p>
-              </div>
-            ))}
+          <div
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 14,
+              padding: 18,
+              color: "#9ca3af",
+              fontSize: 14,
+              lineHeight: 1.55,
+            }}
+          >
+            Pick from your full <span style={{ color: "#e5e7eb", fontWeight: 600 }}>Resemble AI</span> voice library — every voice in your account is available. Open Telegram and send <code style={{ color: "#a78bfa" }}>/voices</code> to browse and tap one to set as your default.
           </div>
         </section>
 

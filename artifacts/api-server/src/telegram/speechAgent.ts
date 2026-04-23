@@ -1,13 +1,10 @@
 import { logger } from "../lib/logger";
-import type { VoicePreset } from "./voices";
 
 const GEMINI_MODEL = process.env["GEMINI_MODEL"] || "gemini-2.0-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-function buildPrompt(text: string, preset: VoicePreset): string {
+function buildPrompt(text: string): string {
   return `You rewrite written text into natural spoken language for a TTS engine.
-
-VOICE STYLE: ${preset.style}.
 
 RULES:
 - Preserve the original meaning exactly. Do not add new facts.
@@ -34,7 +31,6 @@ function basicFallback(text: string): string {
 
 export async function speechAgent(
   text: string,
-  preset: VoicePreset,
   signal?: AbortSignal,
 ): Promise<string> {
   const apiKey = process.env["GEMINI_API_KEY"];
@@ -48,7 +44,7 @@ export async function speechAgent(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: buildPrompt(text, preset) }] }],
+        contents: [{ role: "user", parts: [{ text: buildPrompt(text) }] }],
         generationConfig: {
           temperature: 0.7,
           topP: 0.9,

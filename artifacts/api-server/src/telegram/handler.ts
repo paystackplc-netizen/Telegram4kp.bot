@@ -8,7 +8,13 @@ import {
   editMessageText,
   type InlineButton,
 } from "./telegramApi";
-import { VOICE_PRESETS, getPreset, resolveResembleVoiceId } from "./voices";
+import {
+  getVoicesPage,
+  findVoiceByUuid,
+  findVoiceByQuery,
+  getDefaultVoice,
+  type ResembleVoice,
+} from "./resembleVoices";
 import { getUserVoice, setUserVoice } from "./preferences";
 import { speechAgent } from "./speechAgent";
 import { synthesize } from "./tts";
@@ -49,18 +55,37 @@ export interface TgUpdate {
   callback_query?: TgCallbackQuery;
 }
 
-function voicesKeyboard(): { inline_keyboard: InlineButton[][] } {
-  const ids = Object.keys(VOICE_PRESETS);
+function voiceLabel(v: ResembleVoice): string {
+  const tag = v.gender === "male" ? "👨" : v.gender === "female" ? "👩" : "🎙️";
+  return `${tag} ${v.name}`;
+}
+
+async function buildVoicesKeyboard(
+  page: number,
+  currentUuid: string | null,
+): Promise<{
+  keyboard: { inline_keyboard: InlineButton[][] };
+  caption: string;
+}> {
+  const { items, page: safePage, numPages } = await getVoicesPage(page);
   const rows: InlineButton[][] = [];
-  for (let i = 0; i < ids.length; i += 2) {
-    const row: InlineButton[] = [];
-    for (let j = 0; j < 2 && i + j < ids.length; j++) {
-      const p = VOICE_PRESETS[ids[i + j]!]!;
-      row.push({ text: `${p.emoji} ${p.name}`, callback_data: `voice:${p.id}` });
-    }
-    rows.push(row);
+  for (const v of items) {
+    const marker = currentUuid && v.uuid === currentUuid ? "✓ " : "";
+    rows.push([
+      { text: `${marker}${voiceLabel(v)}`, callback_data: `v:${v.uuid}` },
+    ]);
   }
-  return { inline_keyboard: rows };
+  const nav: InlineButton[] = [];
+  if (safePage > 1) nav.push({ text: "‹ Prev", callback_data: `vp:${safePage - 1}` });
+  nav.push({ text: `${safePage}/${numPages}`, callback_data: "noop" });
+  if (safePage < numPages) nav.push({ text: "Next ›", callback_data: `vp:${safePage + 1}` });
+  if (nav.length) rows.push(nav);
+  return {
+    keyboard: { inline_keyboard: rows },
+    caption: items.length
+      ? "Tap a voice to make it your default."
+      : "No voices found in your Resemble account.",
+  };
 }
 
 function welcomeText(): string {
@@ -71,39 +96,33 @@ function welcomeText(): string {
     "",
     "Quick start:",
     `  ${TRIGGER} Hello world, this is my first voice note`,
-    `  ${TRIGGER}|female|Welcome to the meeting`,
+    `  ${TRIGGER}|<voice name>|Welcome to the meeting`,
     "",
     "Commands:",
-    "  /voices — pick your default voice",
+    "  /voices — browse and pick a voice from your Resemble library",
     "  /help — full guide",
   ].join("\n");
 }
 
 function helpText(): string {
-  const presets = Object.values(VOICE_PRESETS)
-    .map((p) => `  ${p.emoji} ${p.id} — ${p.description}`)
-    .join("\n");
   return [
     "📖 4kpnote Voice Bot — Help",
     "",
     "Trigger:",
     `  ${TRIGGER} <your text>`,
     "",
-    "With a one-off voice:",
+    "With a one-off voice (name or UUID):",
     `  ${TRIGGER}|<voice>|<your text>`,
-    "",
-    "Voices:",
-    presets,
     "",
     "Examples:",
     `  ${TRIGGER} Quick reminder, the sync moves to 3pm`,
-    `  ${TRIGGER}|deep|In a world of infinite possibilities`,
-    `  ${TRIGGER}|whisper|I have a secret to tell you`,
+    `  ${TRIGGER}|Liam|In a world of infinite possibilities`,
+    `  ${TRIGGER}|aabbccdd|Use the exact UUID for precision`,
     "",
     "Tips:",
     "  • Use [PAUSE 2] for an explicit pause",
     "  • Up to 1500 characters per message",
-    "  • Use /voices to set your default voice",
+    "  • Use /voices to browse all voices in your Resemble account",
   ].join("\n");
 }
 
@@ -116,13 +135,27 @@ function parseTrigger(raw: string): { voice: string | null; text: string } | nul
     const rest = after.slice(1);
     const sep = rest.indexOf("|");
     if (sep > 0) {
-      const voice = rest.slice(0, sep).trim().toLowerCase();
+      const voice = rest.slice(0, sep).trim();
       const text = rest.slice(sep + 1).trim();
       return { voice, text };
     }
     return { voice: null, text: rest.trim() };
   }
   return { voice: null, text: after };
+}
+
+async function resolveVoiceForUser(
+  userId: number,
+  oneOff: string | null,
+): Promise<{ uuid: string; name: string } | null> {
+  if (oneOff) {
+    const found = await findVoiceByQuery(oneOff);
+    if (found) return { uuid: found.uuid, name: found.name };
+    return null;
+  }
+  const saved = await getUserVoice(userId).catch(() => null);
+  if (saved) return { uuid: saved.uuid, name: saved.name ?? "Voice" };
+  return getDefaultVoice();
 }
 
 async function handleTrigger(
@@ -153,26 +186,21 @@ async function handleTrigger(
     return;
   }
 
-  let voiceId = parsed.voice;
-  if (!voiceId) {
-    voiceId = await getUserVoice(userId).catch(() => "default");
-  }
-  if (!VOICE_PRESETS[voiceId]) {
-    await sendMessage(
-      chatId,
-      `Unknown voice "${voiceId}". Use /voices to see available options.`,
-      { reply_to_message_id: msg.message_id },
-    );
-    return;
-  }
-  const preset = getPreset(voiceId);
-  const resembleVoice = resolveResembleVoiceId(preset);
-  if (!resembleVoice) {
-    await sendMessage(
-      chatId,
-      "Voice engine isn't configured yet. Ask the bot owner to set RESEMBLE_VOICE_DEFAULT.",
-      { reply_to_message_id: msg.message_id },
-    );
+  const voice = await resolveVoiceForUser(userId, parsed.voice);
+  if (!voice) {
+    if (parsed.voice) {
+      await sendMessage(
+        chatId,
+        `Couldn't find a voice matching "${parsed.voice}". Use /voices to browse your library.`,
+        { reply_to_message_id: msg.message_id },
+      );
+    } else {
+      await sendMessage(
+        chatId,
+        "No voice selected yet. Use /voices to pick one.",
+        { reply_to_message_id: msg.message_id },
+      );
+    }
     return;
   }
 
@@ -181,16 +209,16 @@ async function handleTrigger(
   const ac = new AbortController();
   const timeout = setTimeout(() => ac.abort(), 60_000);
   try {
-    log.info({ userId, voice: preset.id, len: parsed.text.length }, "processing voice request");
-    const processed = await speechAgent(parsed.text, preset, ac.signal);
+    log.info({ userId, voice: voice.name, len: parsed.text.length }, "processing voice request");
+    const processed = await speechAgent(parsed.text, ac.signal);
     await sendChatAction(chatId, "upload_voice");
-    const { audio, contentType } = await synthesize(processed, resembleVoice, ac.signal);
+    const { audio, contentType } = await synthesize(processed, voice.uuid, ac.signal);
     await sendVoice(chatId, audio, {
       reply_to_message_id: msg.message_id,
       contentType,
-      filename: `4kpnote-${preset.id}.ogg`,
+      filename: `4kpnote-${voice.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.ogg`,
     });
-    log.info({ userId, voice: preset.id, bytes: audio.length }, "voice sent");
+    log.info({ userId, voice: voice.name, bytes: audio.length }, "voice sent");
   } catch (err) {
     log.error({ err }, "voice request failed");
     await sendMessage(
@@ -218,15 +246,26 @@ async function handleCommand(
       await sendMessage(chatId, helpText(), { reply_to_message_id: msg.message_id });
       return;
     case "/voices": {
-      const current = msg.from
-        ? await getUserVoice(msg.from.id).catch(() => "default")
-        : "default";
-      const preset = getPreset(current);
-      await sendMessage(
-        chatId,
-        `Current voice: ${preset.emoji} ${preset.name}\nTap a voice to make it your default.`,
-        { reply_to_message_id: msg.message_id, reply_markup: voicesKeyboard() },
-      );
+      const userId = msg.from?.id ?? chatId;
+      const saved = await getUserVoice(userId).catch(() => null);
+      const currentUuid = saved?.uuid ?? null;
+      try {
+        const { keyboard, caption } = await buildVoicesKeyboard(1, currentUuid);
+        const header = saved
+          ? `Current voice: 🎙️ ${saved.name ?? "Voice"}\n${caption}`
+          : `No default voice set yet.\n${caption}`;
+        await sendMessage(chatId, header, {
+          reply_to_message_id: msg.message_id,
+          reply_markup: keyboard,
+        });
+      } catch (err) {
+        log.error({ err }, "failed to load voices list");
+        await sendMessage(
+          chatId,
+          "⚠️ Couldn't load voices from Resemble right now. Please try again shortly.",
+          { reply_to_message_id: msg.message_id },
+        );
+      }
       return;
     }
     default:
@@ -242,25 +281,50 @@ async function handleCallback(
     await answerCallbackQuery(cb.id);
     return;
   }
-  if (cb.data.startsWith("voice:")) {
-    const voiceId = cb.data.slice("voice:".length);
-    if (!VOICE_PRESETS[voiceId]) {
-      await answerCallbackQuery(cb.id, "Unknown voice");
+  if (cb.data === "noop") {
+    await answerCallbackQuery(cb.id);
+    return;
+  }
+  if (cb.data.startsWith("vp:")) {
+    const page = parseInt(cb.data.slice(3), 10) || 1;
+    const saved = await getUserVoice(cb.from.id).catch(() => null);
+    try {
+      const { keyboard, caption } = await buildVoicesKeyboard(page, saved?.uuid ?? null);
+      const header = saved
+        ? `Current voice: 🎙️ ${saved.name ?? "Voice"}\n${caption}`
+        : `No default voice set yet.\n${caption}`;
+      await editMessageText(
+        cb.message.chat.id,
+        cb.message.message_id,
+        header,
+        { reply_markup: keyboard },
+      ).catch(() => {});
+      await answerCallbackQuery(cb.id);
+    } catch (err) {
+      log.error({ err }, "failed to paginate voices");
+      await answerCallbackQuery(cb.id, "Couldn't load page");
+    }
+    return;
+  }
+  if (cb.data.startsWith("v:")) {
+    const uuid = cb.data.slice(2);
+    const voice = await findVoiceByUuid(uuid);
+    if (!voice) {
+      await answerCallbackQuery(cb.id, "Voice not found");
       return;
     }
     try {
-      await setUserVoice(cb.from.id, voiceId);
+      await setUserVoice(cb.from.id, voice.uuid, voice.name);
     } catch (err) {
       log.error({ err }, "failed to save voice preference");
       await answerCallbackQuery(cb.id, "Could not save preference");
       return;
     }
-    const preset = getPreset(voiceId);
-    await answerCallbackQuery(cb.id, `Default voice: ${preset.name}`);
+    await answerCallbackQuery(cb.id, `Default voice: ${voice.name}`);
     await editMessageText(
       cb.message.chat.id,
       cb.message.message_id,
-      `Default voice set to ${preset.emoji} ${preset.name}.\nNow send: ${TRIGGER} <your text>`,
+      `Default voice set to 🎙️ ${voice.name}.\nNow send: ${TRIGGER} <your text>`,
     ).catch(() => {});
     return;
   }
