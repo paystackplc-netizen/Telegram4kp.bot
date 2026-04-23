@@ -12,8 +12,16 @@ function publicBaseUrl(): string | null {
   return null;
 }
 
+function sanitizeSecret(s: string): string {
+  // Telegram allows only A-Z, a-z, 0-9, _ and - in webhook secrets, max 256 chars
+  return s.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 256);
+}
+
 function getWebhookSecret(): string | null {
-  return process.env["WEBHOOK_SECRET"] || process.env["SESSION_SECRET"] || null;
+  const raw = process.env["WEBHOOK_SECRET"] || process.env["SESSION_SECRET"];
+  if (!raw) return null;
+  const cleaned = sanitizeSecret(raw);
+  return cleaned.length >= 16 ? cleaned : null;
 }
 
 export async function autoRegisterWebhook(): Promise<void> {

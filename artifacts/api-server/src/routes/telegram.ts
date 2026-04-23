@@ -11,13 +11,19 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 function getWebhookSecret(): string {
-  const secret = process.env["WEBHOOK_SECRET"] || process.env["SESSION_SECRET"];
-  if (!secret) {
+  const raw = process.env["WEBHOOK_SECRET"] || process.env["SESSION_SECRET"];
+  if (!raw) {
     throw new Error(
       "WEBHOOK_SECRET (or SESSION_SECRET) must be set for webhook validation",
     );
   }
-  return secret;
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 256);
+  if (cleaned.length < 16) {
+    throw new Error(
+      "Webhook secret too short after sanitization (need 16+ allowed chars)",
+    );
+  }
+  return cleaned;
 }
 
 function publicBaseUrl(): string | null {

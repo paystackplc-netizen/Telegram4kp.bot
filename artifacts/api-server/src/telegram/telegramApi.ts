@@ -3,9 +3,17 @@ import { logger } from "../lib/logger";
 const API_BASE = "https://api.telegram.org";
 
 function token(): string {
-  const t = process.env["BOT_TOKEN"];
-  if (!t) throw new Error("BOT_TOKEN not configured");
-  return t;
+  const raw = process.env["BOT_TOKEN"];
+  if (!raw) throw new Error("BOT_TOKEN not configured");
+  const trimmed = raw.trim();
+  // Telegram tokens are <bot_id>:<35+ char alphanumeric/_-> — extract from any wrapping text
+  const match = trimmed.match(/\b(\d{6,12}:[A-Za-z0-9_-]{30,})\b/);
+  if (!match) {
+    throw new Error(
+      "BOT_TOKEN does not contain a valid Telegram bot token (expected <id>:<key>)",
+    );
+  }
+  return match[1]!;
 }
 
 async function call<T = unknown>(method: string, payload: unknown): Promise<T> {
