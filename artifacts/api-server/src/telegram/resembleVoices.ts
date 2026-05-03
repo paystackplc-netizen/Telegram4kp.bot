@@ -23,13 +23,19 @@ interface VoicesPage {
 
 interface CachedAll {
   fetchedAt: number;
-  voices: ResembleVoice[];
+  voices: ResembleVoice[];    // only ready voices
+  allVoices: ResembleVoice[]; // every voice including non-ready
 }
 
 let cache: CachedAll | null = null;
-let inflight: Promise<ResembleVoice[]> | null = null;
+let inflight: Promise<CachedAll> | null = null;
 
-async function fetchAllVoices(signal?: AbortSignal): Promise<ResembleVoice[]> {
+/** A voice is usable if its status is "ready" or unknown (older API versions omit status). */
+function isReady(v: ResembleVoice): boolean {
+  return !v.status || v.status === "ready";
+}
+
+async function fetchAllVoices(signal?: AbortSignal): Promise<CachedAll> {
   const apiKey = process.env["RESEMBLE_API_KEY"];
   if (!apiKey) throw new Error("RESEMBLE_API_KEY not configured");
 
@@ -69,48 +75,47 @@ async function fetchAllVoices(signal?: AbortSignal): Promise<ResembleVoice[]> {
         uuid,
         name,
         status: typeof item["status"] === "string" ? (item["status"] as string) : undefined,
-        gender:
-          typeof item["gender"] === "string" ? (item["gender"] as string) : null,
-        language:
-          typeof item["language"] === "string"
-            ? (item["language"] as string)
-            : null,
+        gender: typeof item["gender"] === "string" ? (item["gender"] as string) : null,
+        language: typeof item["language"] === "string" ? (item["language"] as string) : null,
       });
     }
     numPages = typeof data.num_pages === "number" ? data.num_pages : 1;
     page += 1;
-    // Safety cap
     if (page > 50) break;
   } while (page <= numPages);
 
-  // Sort: ready-status voices first, then alphabetical
-  all.sort((a, b) => {
-    const ar = a.status === "ready" ? 0 : 1;
-    const br = b.status === "ready" ? 0 : 1;
-    if (ar !== br) return ar - br;
-    return a.name.localeCompare(b.name);
-  });
-  return all;
+  const ready = all.filter(isReady);
+  const notReady = all.filter((v) => !isReady(v));
+  if (notReady.length > 0) {
+    logger.info(
+      { notReady: notReady.map((v) => `${v.name} (${v.status ?? "unknown"})`).join(", ") },
+      "Resemble: some voices are not ready and will be hidden from picker",
+    );
+  }
+
+  const sort = (arr: ResembleVoice[]) =>
+    arr.sort((a, b) => a.name.localeCompare(b.name));
+
+  return { voices: sort(ready), allVoices: sort(all), fetchedAt: Date.now() };
 }
 
+async function getCache(forceRefresh = false, signal?: AbortSignal): Promise<CachedAll> {
+  const now = Date.now();
+  if (!forceRefresh && cache && now - cache.fetchedAt < CACHE_TTL_MS) return cache;
+  if (inflight) return inflight;
+  inflight = fetchAllVoices(signal)
+    .then((c) => { cache = c; return c; })
+    .finally(() => { inflight = null; });
+  return inflight;
+}
+
+/** Only ready voices — used for the /voices picker. */
 export async function getAllVoices(
   forceRefresh = false,
   signal?: AbortSignal,
 ): Promise<ResembleVoice[]> {
-  const now = Date.now();
-  if (!forceRefresh && cache && now - cache.fetchedAt < CACHE_TTL_MS) {
-    return cache.voices;
-  }
-  if (inflight) return inflight;
-  inflight = fetchAllVoices(signal)
-    .then((voices) => {
-      cache = { fetchedAt: Date.now(), voices };
-      return voices;
-    })
-    .finally(() => {
-      inflight = null;
-    });
-  return inflight;
+  const c = await getCache(forceRefresh, signal);
+  return c.voices;
 }
 
 export async function getVoicesPage(
@@ -129,47 +134,52 @@ export async function getVoicesPage(
   };
 }
 
-export async function findVoiceByUuid(
-  uuid: string,
-): Promise<ResembleVoice | null> {
-  const all = await getAllVoices().catch(() => [] as ResembleVoice[]);
+export async function findVoiceByUuid(uuid: string): Promise<ResembleVoice | null> {
+  const c = await getCache().catch(() => null);
+  const all = c?.allVoices ?? [];
   return all.find((v) => v.uuid === uuid) ?? null;
 }
 
-export async function findVoiceByQuery(
-  query: string,
-): Promise<ResembleVoice | null> {
+export async function findVoiceByQuery(query: string): Promise<ResembleVoice | null> {
   const q = query.trim().toLowerCase();
   if (!q) return null;
-  const all = await getAllVoices().catch(() => [] as ResembleVoice[]);
-  // Exact uuid
-  const exactUuid = all.find((v) => v.uuid.toLowerCase() === q);
+  // Search only ready voices — can't use a non-ready one for synthesis
+  const voices = await getAllVoices().catch(() => [] as ResembleVoice[]);
+  const exactUuid = voices.find((v) => v.uuid.toLowerCase() === q);
   if (exactUuid) return exactUuid;
-  // Exact name (case-insensitive)
-  const exactName = all.find((v) => v.name.toLowerCase() === q);
+  const exactName = voices.find((v) => v.name.toLowerCase() === q);
   if (exactName) return exactName;
-  // Starts-with
-  const starts = all.find((v) => v.name.toLowerCase().startsWith(q));
+  const starts = voices.find((v) => v.name.toLowerCase().startsWith(q));
   if (starts) return starts;
-  // Contains
-  const contains = all.find((v) => v.name.toLowerCase().includes(q));
-  return contains ?? null;
+  return voices.find((v) => v.name.toLowerCase().includes(q)) ?? null;
+}
+
+/**
+ * Check whether a previously-saved voice UUID is still ready.
+ * Returns the voice if OK, null if it no longer exists or isn't ready.
+ */
+export async function checkVoiceReady(uuid: string): Promise<ResembleVoice | null> {
+  const c = await getCache().catch(() => null);
+  const all = c?.allVoices ?? [];
+  const voice = all.find((v) => v.uuid === uuid);
+  if (!voice) return null;
+  if (!isReady(voice)) return null;
+  return voice;
 }
 
 export async function getDefaultVoice(): Promise<{ uuid: string; name: string } | null> {
   const envUuid = (process.env["RESEMBLE_VOICE_DEFAULT"] || "").trim();
-  const all = await getAllVoices().catch(() => [] as ResembleVoice[]);
+  const voices = await getAllVoices().catch(() => [] as ResembleVoice[]);
   if (envUuid) {
-    const match = all.find((v) => v.uuid === envUuid);
+    const match = voices.find((v) => v.uuid === envUuid);
     if (match) return { uuid: match.uuid, name: match.name };
-    // env UUID not in account — fall through to first voice
     logger.warn(
       { envUuid },
-      "RESEMBLE_VOICE_DEFAULT does not match any voice in this account; using first available",
+      "RESEMBLE_VOICE_DEFAULT is not a ready voice in this account; using first available",
     );
   }
-  if (all.length > 0) {
-    const first = all[0]!;
+  if (voices.length > 0) {
+    const first = voices[0]!;
     return { uuid: first.uuid, name: first.name };
   }
   return null;

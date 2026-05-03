@@ -16,12 +16,14 @@ import {
   findVoiceByUuid,
   findVoiceByQuery,
   getDefaultVoice,
+  checkVoiceReady,
   type ResembleVoice,
 } from "./resembleVoices";
 import { getUserVoice, setUserVoice } from "./preferences";
 import { speechAgent } from "./speechAgent";
 import { synthesize } from "./tts";
 import { convertToVoiceNote, convertToVideoNote } from "./mediaConverter";
+import { taskSemaphore } from "../lib/concurrency";
 
 const TRIGGER = "4kpnote";
 const MAX_TEXT_LEN = 1500;
@@ -174,7 +176,12 @@ async function resolveVoiceForUser(
     return null;
   }
   const saved = await getUserVoice(userId).catch(() => null);
-  if (saved) return { uuid: saved.uuid, name: saved.name ?? "Voice" };
+  if (saved) {
+    // Make sure the saved voice is still ready before using it
+    const ready = await checkVoiceReady(saved.uuid).catch(() => null);
+    if (ready) return { uuid: ready.uuid, name: ready.name };
+    // Voice was saved but is no longer ready (training / deleted) — fall back
+  }
   return getDefaultVoice();
 }
 
@@ -480,7 +487,21 @@ export async function handleUpdate(
   if (!msg) return;
 
   // Media-drop takes priority over text parsing
-  if (await handleMediaDrop(msg, log)) return;
+  const mediaDone = await (async () => {
+    if (!msg.voice && !msg.audio && !msg.video && !msg.video_note && !msg.document) return false;
+    // Only attempt if it looks like a media message — check slot before processing
+    if (!taskSemaphore.available) {
+      await sendMessage(
+        msg.chat.id,
+        "⏳ I'm busy with 3 tasks right now. Please wait a moment and try again.",
+        { reply_to_message_id: msg.message_id },
+      ).catch(() => {});
+      return true;
+    }
+    const result = await taskSemaphore.run(() => handleMediaDrop(msg, log));
+    return result.ok ? result.value : false;
+  })();
+  if (mediaDone) return;
 
   const text = msg.text ?? msg.caption ?? "";
   if (!text) return;
@@ -493,6 +514,14 @@ export async function handleUpdate(
     return;
   }
   if (trimmed.toLowerCase().startsWith(TRIGGER)) {
-    await handleTrigger(msg, trimmed, log);
+    if (!taskSemaphore.available) {
+      await sendMessage(
+        msg.chat.id,
+        "⏳ I'm busy with 3 tasks right now. Please wait a moment and try again.",
+        { reply_to_message_id: msg.message_id },
+      ).catch(() => {});
+      return;
+    }
+    await taskSemaphore.run(() => handleTrigger(msg, trimmed, log));
   }
 }

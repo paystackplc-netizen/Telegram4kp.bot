@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { migrateDb } from "./lib/migrate";
 import { autoRegisterWebhook } from "./telegram/autoSetup";
 
 // Process-level safety net: never let a stray error or a transient
@@ -44,10 +45,10 @@ const server = app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  // Fire and forget — don't block startup
-  autoRegisterWebhook().catch((e) =>
-    logger.error({ err: e }, "autoRegisterWebhook failed"),
-  );
+  // Run DB migration then register webhook — non-blocking
+  migrateDb()
+    .then(() => autoRegisterWebhook())
+    .catch((e) => logger.error({ err: e }, "startup tasks failed"));
 
   // Periodically re-register the webhook in case Replit's edge proxy
   // changes domains (idle wake-up, redeploy, etc.). 6h cadence — cheap.
