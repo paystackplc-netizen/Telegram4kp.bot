@@ -3,9 +3,12 @@ import { logger as defaultLogger } from "../lib/logger";
 import {
   sendMessage,
   sendVoice,
+  sendVideoNote,
   sendChatAction,
   answerCallbackQuery,
   editMessageText,
+  getFile,
+  downloadTelegramFile,
   type InlineButton,
 } from "./telegramApi";
 import {
@@ -18,6 +21,7 @@ import {
 import { getUserVoice, setUserVoice } from "./preferences";
 import { speechAgent } from "./speechAgent";
 import { synthesize } from "./tts";
+import { convertToVoiceNote, convertToVideoNote } from "./mediaConverter";
 
 const TRIGGER = "4kpnote";
 const MAX_TEXT_LEN = 1500;
@@ -33,6 +37,15 @@ interface TgChat {
   id: number;
   type: string;
 }
+interface TgFileRef {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  mime_type?: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
 interface TgMessage {
   message_id: number;
   from?: TgUser;
@@ -40,6 +53,12 @@ interface TgMessage {
   text?: string;
   caption?: string;
   entities?: Array<{ type: string; offset: number; length: number }>;
+  // Media attachments
+  audio?: TgFileRef;
+  voice?: TgFileRef;
+  video?: TgFileRef;
+  video_note?: TgFileRef;
+  document?: TgFileRef;
 }
 interface TgCallbackQuery {
   id: string;
@@ -339,6 +358,95 @@ async function handleCallback(
   await answerCallbackQuery(cb.id);
 }
 
+// ─── Media-drop handler ──────────────────────────────────────────────────────
+
+function extFromMime(mime: string): string {
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("opus")) return "ogg";
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("flac")) return "flac";
+  if (mime.includes("mp4")) return "mp4";
+  if (mime.includes("webm")) return "webm";
+  if (mime.includes("quicktime") || mime.includes("mov")) return "mov";
+  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
+  if (mime.includes("aac")) return "aac";
+  if (mime.includes("3gpp")) return "3gp";
+  return "bin";
+}
+
+async function handleMediaDrop(
+  msg: TgMessage,
+  log: Logger,
+): Promise<boolean> {
+  const chatId = msg.chat.id;
+  const replyOpts = { reply_to_message_id: msg.message_id };
+
+  // Detect what kind of media was sent
+  const audioRef = msg.voice ?? msg.audio;
+  const videoRef = msg.video ?? msg.video_note;
+
+  // Documents may be audio or video — check mime type
+  let docAudioRef: TgFileRef | undefined;
+  let docVideoRef: TgFileRef | undefined;
+  if (msg.document) {
+    const mime = msg.document.mime_type ?? "";
+    if (mime.startsWith("audio/")) docAudioRef = msg.document;
+    else if (mime.startsWith("video/")) docVideoRef = msg.document;
+  }
+
+  const effectiveAudio = audioRef ?? docAudioRef;
+  const effectiveVideo = videoRef ?? docVideoRef;
+
+  if (!effectiveAudio && !effectiveVideo) return false; // nothing to handle
+
+  const isVideo = !!effectiveVideo;
+  const fileRef = (effectiveVideo ?? effectiveAudio)!;
+  const mime = fileRef.mime_type ?? "";
+  const ext = extFromMime(mime);
+  const sizeMB = ((fileRef.file_size ?? 0) / 1024 / 1024).toFixed(1);
+
+  log.info(
+    { fileId: fileRef.file_id, mime, ext, sizeMB, isVideo },
+    "[MEDIA] media drop received",
+  );
+
+  try {
+    await sendChatAction(chatId, isVideo ? "upload_video" : "upload_voice");
+
+    log.info("[MEDIA] step 1/3: downloading file from Telegram");
+    const filePath = await getFile(fileRef.file_id);
+    const raw = await downloadTelegramFile(filePath);
+    log.info({ bytes: raw.length }, "[MEDIA] step 2/3: converting");
+
+    if (isVideo) {
+      await sendChatAction(chatId, "upload_video");
+      const { buffer, duration } = await convertToVideoNote(raw, ext);
+      log.info({ bytes: buffer.length, duration }, "[MEDIA] step 3/3: sending video note");
+      await sendVideoNote(chatId, buffer, { ...replyOpts, duration, length: 240 });
+    } else {
+      await sendChatAction(chatId, "upload_voice");
+      const buffer = await convertToVoiceNote(raw, ext);
+      log.info({ bytes: buffer.length }, "[MEDIA] step 3/3: sending voice note");
+      await sendVoice(chatId, buffer, { ...replyOpts, contentType: "audio/ogg", filename: "voice.ogg" });
+    }
+
+    log.info("[MEDIA] done ✓");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ err, message }, "[MEDIA] conversion failed");
+    const detail = message.length > 0 && message.length < 200 ? `\n\nDetails: ${message}` : "";
+    await sendMessage(
+      chatId,
+      `⚠️ Could not convert the ${isVideo ? "video" : "audio"} file. Please try again.${detail}`,
+      replyOpts,
+    ).catch(() => {});
+  }
+
+  return true;
+}
+
+// ─── Main dispatcher ──────────────────────────────────────────────────────────
+
 export async function handleUpdate(
   update: TgUpdate,
   log: Logger = defaultLogger,
@@ -349,6 +457,10 @@ export async function handleUpdate(
   }
   const msg = update.message ?? update.edited_message ?? update.channel_post;
   if (!msg) return;
+
+  // Media-drop takes priority over text parsing
+  if (await handleMediaDrop(msg, log)) return;
+
   const text = msg.text ?? msg.caption ?? "";
   if (!text) return;
 

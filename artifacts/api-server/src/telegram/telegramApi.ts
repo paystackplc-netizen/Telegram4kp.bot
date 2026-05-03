@@ -71,7 +71,7 @@ export async function editMessageText(
 
 export async function sendChatAction(
   chatId: number | string,
-  action: "record_voice" | "upload_voice" | "typing",
+  action: "record_voice" | "upload_voice" | "upload_video" | "typing",
 ): Promise<void> {
   try {
     await call("sendChatAction", { chat_id: chatId, action });
@@ -146,6 +146,47 @@ export async function sendAudio(
   }
 }
 
+export async function sendVideoNote(
+  chatId: number | string,
+  video: Buffer,
+  opts: {
+    reply_to_message_id?: number;
+    duration?: number;
+    length?: number;
+  } = {},
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  if (opts.reply_to_message_id != null) {
+    form.append("reply_to_message_id", String(opts.reply_to_message_id));
+  }
+  if (opts.duration != null) form.append("duration", String(opts.duration));
+  form.append("length", String(opts.length ?? 240));
+  const ab = video.buffer.slice(video.byteOffset, video.byteOffset + video.byteLength) as ArrayBuffer;
+  form.append("video_note", new Blob([ab], { type: "video/mp4" }), "video_note.mp4");
+  const res = await fetch(`${API_BASE}/bot${token()}/sendVideoNote`, {
+    method: "POST",
+    body: form,
+  });
+  const data = (await res.json()) as { ok: boolean; description?: string };
+  if (!data.ok) {
+    logger.error({ description: data.description }, "sendVideoNote failed");
+    throw new Error(`sendVideoNote failed: ${data.description}`);
+  }
+}
+
+export async function getFile(fileId: string): Promise<string> {
+  const data = await call<{ file_path: string }>("getFile", { file_id: fileId });
+  return data.file_path;
+}
+
+export async function downloadTelegramFile(filePath: string): Promise<Buffer> {
+  const tok = token();
+  const res = await fetch(`${API_BASE}/file/bot${tok}/${filePath}`);
+  if (!res.ok) throw new Error(`Failed to download Telegram file: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 export interface WebhookInfo {
   url: string;
   pending_update_count: number;
@@ -159,7 +200,7 @@ export async function setWebhook(
   await call("setWebhook", {
     url,
     secret_token: secretToken,
-    allowed_updates: ["message", "callback_query"],
+    allowed_updates: ["message", "edited_message", "channel_post", "callback_query"],
     drop_pending_updates: false,
   });
 }
