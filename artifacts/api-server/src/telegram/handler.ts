@@ -42,6 +42,7 @@ interface TgFileRef {
   file_unique_id: string;
   file_size?: number;
   mime_type?: string;
+  file_name?: string;
   duration?: number;
   width?: number;
   height?: number;
@@ -360,9 +361,27 @@ async function handleCallback(
 
 // ─── Media-drop handler ──────────────────────────────────────────────────────
 
-function extFromMime(mime: string): string {
-  if (mime.includes("ogg")) return "ogg";
-  if (mime.includes("opus")) return "ogg";
+const AUDIO_EXTS = new Set(["mp3","m4a","aac","ogg","oga","opus","wav","flac","wma","aiff","aif","3gp","3gpp","amr","weba"]);
+const VIDEO_EXTS = new Set(["mp4","mov","avi","mkv","webm","flv","wmv","m4v","3gp","3gpp","mpeg","mpg","ts","mts"]);
+
+function fileKindFromDoc(ref: TgFileRef): "audio" | "video" | null {
+  const mime = (ref.mime_type ?? "").toLowerCase();
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  // Fallback: check file extension from file_name
+  const name = (ref.file_name ?? "").toLowerCase();
+  const ext = name.split(".").pop() ?? "";
+  if (ext && AUDIO_EXTS.has(ext)) return "audio";
+  if (ext && VIDEO_EXTS.has(ext)) return "video";
+  return null;
+}
+
+function extFromRef(ref: TgFileRef): string {
+  const name = (ref.file_name ?? "").toLowerCase();
+  const extFromName = name.split(".").pop() ?? "";
+  if (extFromName) return extFromName;
+  const mime = (ref.mime_type ?? "").toLowerCase();
+  if (mime.includes("ogg") || mime.includes("opus")) return "ogg";
   if (mime.includes("wav")) return "wav";
   if (mime.includes("flac")) return "flac";
   if (mime.includes("mp4")) return "mp4";
@@ -371,6 +390,8 @@ function extFromMime(mime: string): string {
   if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
   if (mime.includes("aac")) return "aac";
   if (mime.includes("3gpp")) return "3gp";
+  if (mime.startsWith("audio/")) return "mp3";
+  if (mime.startsWith("video/")) return "mp4";
   return "bin";
 }
 
@@ -381,17 +402,17 @@ async function handleMediaDrop(
   const chatId = msg.chat.id;
   const replyOpts = { reply_to_message_id: msg.message_id };
 
-  // Detect what kind of media was sent
+  // Native Telegram media types (voice, audio, video, video_note)
   const audioRef = msg.voice ?? msg.audio;
   const videoRef = msg.video ?? msg.video_note;
 
-  // Documents may be audio or video — check mime type
+  // Documents — detect kind from mime_type AND file extension
   let docAudioRef: TgFileRef | undefined;
   let docVideoRef: TgFileRef | undefined;
   if (msg.document) {
-    const mime = msg.document.mime_type ?? "";
-    if (mime.startsWith("audio/")) docAudioRef = msg.document;
-    else if (mime.startsWith("video/")) docVideoRef = msg.document;
+    const kind = fileKindFromDoc(msg.document);
+    if (kind === "audio") docAudioRef = msg.document;
+    else if (kind === "video") docVideoRef = msg.document;
   }
 
   const effectiveAudio = audioRef ?? docAudioRef;
@@ -402,7 +423,7 @@ async function handleMediaDrop(
   const isVideo = !!effectiveVideo;
   const fileRef = (effectiveVideo ?? effectiveAudio)!;
   const mime = fileRef.mime_type ?? "";
-  const ext = extFromMime(mime);
+  const ext = extFromRef(fileRef);
   const sizeMB = ((fileRef.file_size ?? 0) / 1024 / 1024).toFixed(1);
 
   log.info(
